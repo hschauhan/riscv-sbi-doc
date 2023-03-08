@@ -1,0 +1,505 @@
+== SBI Supervisor Software Events Extension (EID #0x535345 "SSE")
+
+The SBI Supervisor Software Events (SSE) extension provides a
+mechanism to inject software events from SBI implementation to
+supervisor software such that it preempts all other traps and
+interrupts.
+
+The software events can be of two types: local or global. A
+local software event is local to a HART and can be handled
+only on that HART whereas a global software event is a system
+event and can be handled by any HART.
+
+=== Software Event Identification
+
+Each software event is identified by a unique 32-bit unsigned
+integer called `event_id` which is encoded as shown in
+<<table_sse_event_ids>> below.
+
+[#table_sse_event_ids]
+.SSE Event Identification
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Software Event ID            | Description
+| 0x00000000                   | Local debug event
+| 0x00000001                   | Local RAS event
+| 0x00000002                   | Local async page fault event
+| 0x00000003                   | Local PMU event
+| 0x00000004 - 0x3fffffff      | Reserved for future use
+| 0x40000000 - 0x7fffffff      | Local platform specific event
+| 0x80000000                   | Global debug event
+| 0x80000001                   | Global RAS event
+| 0x80000002 - 0xbfffffff      | Reserved for future use
+| 0xc0000000 - 0xffffffff      | Global platform specific event
+|===
+
+=== Software Event States
+
+At any point in time, a software event can be in one of the
+following states:
+
+. **UNUSED**     - Software event is not used by supervisor software
+. **REGISTERED** - Supervisor software has provided an event
+                    handler for the software event but it is
+                    not ready to handle the events.
+. **ENABLED**    - Supervisor software is ready to handle the
+                    software event.
+. **PENDING**    - Software event is pending and not yet delivered
+                    to the supervisor software.
+. **RUNNING**    - Supervisor software has taken the software
+                    event and is busy handling it.
+
+The below diagram shows the state transitions of a software
+event.
+
+[#figure_sbi_sse_state_machine]
+.SBI SSE State Machine
+image::riscv-sbi-sse-sm.png[]
+
+A **global** software event **MUST** be registered and enabled only once by
+any HART. By default, a global software event will be routed to any HART
+but supervisor software can select a specific HART to handle this event.
+The state of a global software event **MUST** be common to all HARTs.
+
+A **local** software event **MUST** be registered and enabled by all HARTs
+who want to handle this event. The state of a local software event
+**MUST** be tracked separately for each HART.
+
+=== Software Event Priority
+
+Each software event has an associated event priority (also
+referred as `event_priority`) which can be used by an SBI
+implementation to select a software event for injection
+when multiple software events are pending on the same HART.
+
+The priority of a software event is a 32-bit unsigned
+integer where higher value means higher priority. By default,
+all software events have event priority as zero.
+
+A higher priority event, unless disabled by supervisor software,
+**always** preempts a lower priority event on the same HART.
+Once the higher priority event is marked as completed, the
+previous handler will be resumed.
+
+=== Software Event Attributes
+
+The details of a software event (local or global) can be
+accessed by supervisor software inform for event attributes.
+Each event attribute is identified using a unique 32-bit
+unsigned integer called `attr_id`. The <<table_sse_event_attributes>>
+below provides a list event attributes.
+
+[#table_sse_event_attributes]
+.SSE Event Attributes
+[cols="3,3,5,5", width=90%, align="center", options="header"]
+|===
+| Attribute ID (attr_id)
+| Read-Only
+| Description
+| Possible values
+
+| 0x00000000
+| Yes
+| Software event state
+| 0: UNUSED +
+  1: REGISTERED +
+  2: ENABLED +
+  3: PENDING +
+  4: RUNNING
+
+| 0x00000001
+| No
+| Software event priority
+| 32-bit unsigned integer
+
+| 0x00000002
+| Yes
+| Event injection by the supervisor software using `sbi_sse_inject` call.
+| 0: Not allowed +
+  1: Allowed
+
+| 0x00000003
+|  No  (global) +
+   Yes (local)
+| The HART id of HART that should be preferred to handle the global software event
+| unsigned long integer
+
+| 0x00000004
+| Yes
+| Raw Pending Status
+| This is set when the event source signals the event. When the event is injected, it is cleared. +
+  0: Not Pending
+  1: Pending
+
+| > 0x00000004
+| ---
+| Reserved for future use
+| ---
+|===
+
+=== Software Event Handler
+To handle a software event, the supervisor software MUST register
+an event handler and enable it. Each event handler registered by
+the supervisor software consist of two things:
+
+. **Handler entry virtual address** - The entry virtual address of event
+handler code is represented by `handler_entry_virt`. The
+`handler_entry_virt` must be a 2-byte aligned address.
+
+. **Handler context** - The event handler context must be contiguous in
+both virtual and physical address space. The virtual address and
+physical address of event handler context is represented by
+`handler_context_virt` and `handler_context_phys` respectively. The
+size of the event handler context is represented by `handler_context_size`.
+Both `handler_context_virt` and `handler_context_phys` must be aligned
+to (XLEN / 8) bytes whereas `handler_context_size` must be at least 4096
+bytes and multiple of (XLEN / 8). The supervisor state is saved at the end
+of the handler context.
+
+=== Software Event Injection
+
+To inject a software event on a HART, the SBI implementation must
+do the following:
+
+. Compute handler stack pointer (`handler_sp`) which is `XLEN / 8`
+  bytes aligned and **at least 1024 bytes** away from the end of the
+  event handler context. For example, an analogous C statement would
+  be:
+
+[source, C]
+----
+  handler_sp = handler_context_virt + handler_context_size - 1024
+----
+
+[#sse_save_exception_state,reftext=SSE save exception state]
+[start=2]
+. Save supervisor register state relative to the handler stack
+  pointer (`handler_sp`) in little endian byte ordering as shown
+  in <<table_sse_register_saved_state>> below.
+
+[#table_sse_register_saved_state]
+.SSE Supervisor Register Saved State On Stack
+[cols="5,3", width=90%, align="center", options="header"]
+|===
+| Handler Stack Offset              | Data
+| `handler_sp` + 0 * (XLEN / 8)     | Interrupted program counter
+| `handler_sp` + 1 * (XLEN / 8)     | Saved copy of X1
+| `handler_sp` + 2 * (XLEN / 8)     | Saved copy of X2
+| `handler_sp` + 3 * (XLEN / 8)     | Saved copy of X3
+| `handler_sp` + 4 * (XLEN / 8)     | Saved copy of X4
+| `handler_sp` + 5 * (XLEN / 8)     | Saved copy of X5
+| `handler_sp` + 6 * (XLEN / 8)     | Saved copy of X6
+| `handler_sp` + 7 * (XLEN / 8)     | Saved copy of X7
+| `handler_sp` + 8 * (XLEN / 8)     | Saved copy of X8
+| `handler_sp` + 9 * (XLEN / 8)     | Saved copy of X9
+| `handler_sp` + 10 * (XLEN / 8)    | Saved copy of X10
+| `handler_sp` + 11 * (XLEN / 8)    | Saved copy of X11
+| `handler_sp` + 12 * (XLEN / 8)    | Saved copy of X12
+| `handler_sp` + 13 * (XLEN / 8)    | Saved copy of X13
+| `handler_sp` + 14 * (XLEN / 8)    | Saved copy of X14
+| `handler_sp` + 15 * (XLEN / 8)    | Saved copy of X15
+| `handler_sp` + 16 * (XLEN / 8)    | Saved copy of X16
+| `handler_sp` + 17 * (XLEN / 8)    | Saved copy of X17
+| `handler_sp` + 18 * (XLEN / 8)    | Saved copy of X18
+| `handler_sp` + 19 * (XLEN / 8)    | Saved copy of X19
+| `handler_sp` + 20 * (XLEN / 8)    | Saved copy of X20
+| `handler_sp` + 21 * (XLEN / 8)    | Saved copy of X21
+| `handler_sp` + 22 * (XLEN / 8)    | Saved copy of X22
+| `handler_sp` + 23 * (XLEN / 8)    | Saved copy of X23
+| `handler_sp` + 24 * (XLEN / 8)    | Saved copy of X24
+| `handler_sp` + 25 * (XLEN / 8)    | Saved copy of X25
+| `handler_sp` + 26 * (XLEN / 8)    | Saved copy of X26
+| `handler_sp` + 27 * (XLEN / 8)    | Saved copy of X27
+| `handler_sp` + 28 * (XLEN / 8)    | Saved copy of X28
+| `handler_sp` + 29 * (XLEN / 8)    | Saved copy of X29
+| `handler_sp` + 30 * (XLEN / 8)    | Saved copy of X30
+| `handler_sp` + 31 * (XLEN / 8)    | Saved copy of X31
+| `handler_sp` + 32 * (XLEN / 8)    | Interrupted state +
+                                      **bit[0]** = Privilege mode which
+                                                   was interrupted +
+                                                  (1 = S-mode, 0 = U-mode) +
+                                      **bit[1]** = Virtualization state
+                                                  which was interrupted +
+                                                 (1 = ON, 0 = OFF) +
+                                      **bit[2]** = Saved copy of
+                                                   sstatus.SPIE +
+                                      **bit[XLEN-1:3]** = Reserved for
+                                                          future use
+|===
+
+[start=3]
+. Update supervisor registers as follows:
+   .. Set sp = `handler_sp`
+   .. Set a0 = `event_id`
+   .. Set a1 = `handler_sp`
+   .. Set a2 = `handler_context_virt`
+   .. Set sstatus.SPIE = sstatus.SIE
+   .. Set sstatus.SIE = 0
+. Resume execution with:
+   .. Program counter = `handler_entry_virt`
+   .. Privilege mode = S-mode
+   .. Virtualization state = OFF
+
+=== Software Event Completion
+
+After handling the software event on a HART, the supervisor
+software must notify the SBI implementation about completion
+of event handling using using `sbi_sse_complete` call. The
+SBI implementation must do the following to complete event
+handling and resume interrupted state:
+
+. Re-compute handler stack pointer (`handler_sp`) as described
+  in <<_software_event_injection>>.
+. Restore X1 to X31 registers from offsets relative to the
+  handler stack pointer (`handler_sp`) as described in
+  <<table_sse_register_saved_state>>.
+. Update supervisor CSRs as follows:
+   .. Set sstatus.SIE = sstatus.SPIE
+   .. Set sstatus.SPIE = bit[2] of the value at
+                        `handler_sp` + 32 * (XLEN / 8)
+. Resume execution with:
+   * Virtualization state =  bit[1] of the value at
+                            `handler_sp` + 32 * (XLEN / 8)
+   * Privilege mode = bit[0] of the value at
+                     `handler_sp` + 32 * (XLEN / 8)
+   * Program counter = value at `handler_sp` + 0 * (XLEN / 8)
+
+=== Function: Get a software event attribute (FID #0)
+
+[source, C]
+----
+struct sbiret sbi_sse_get_attr(uint32_t event_id,
+                               uint32_t attr_id)
+----
+
+Get an event attribute value of software event. The `event_id`
+parameter specifies the software event whereas `attr_id` parameter
+specifies the event attribute.
+
+Upon success the event attribute value is returned in `sbiret.value`.
+In case of an error, the possible error codes are shown in the
+<<table_sse_get_attr_errors>> below:
+
+[#table_sse_get_attr_errors]
+.SSE Event Attribute Read Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code            | Description
+| SBI_SUCCESS           | Attribute of given event returned successfully.
+| SBI_ERR_INVALID_PARAM | `event_id` or `attr_id` or both are invalid.
+|===
+
+=== Function: Set a software event attribute (FID #1)
+
+[source, C]
+----
+struct sbiret sbi_sse_set_attr(uint32_t event_id,
+                               uint32_t attr_id,
+                               unsigned long value)
+----
+
+Set an event attribute value of software event. The `event_id`
+parameter specifies the software event whereas `attr_id` parameter
+specifies the event attribute. The new event attribute value is
+specified by `value` parameter.
+
+Any error is returned in `sbiret.error`. The possible return values
+are listed in <<table_sse_set_attr_errors>> below:
+
+[#table_sse_set_attr_errors]
+.SSE Event Attribute Write Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code            | Description
+| SBI_SUCCESS           | Attribute value set successfully.
+| SBI_ERR_INVALID_PARAM | `event_id` or `attr_id` or both are invalid
+| SBI_ERR_BAD_RANGE     | `value` does not match the possible values
+	                   defined in <<table_sse_event_attributes>>.
+|===
+
+=== Function: Register a software event (FID #2)
+
+[source, C]
+----
+struct sbiret sbi_sse_register(uint32_t event_id,
+                               unsigned long handler_entry_virt,
+                               unsinged long handler_context_virt,
+                               unsigned long handler_context_phys_hi,
+                               unsigned long handler_context_phys_lo,
+                               unsigned long handler_context_size)
+----
+
+Register a handler for the software event. The `event_id` parameter
+specifies the event ID for which handler is being registered. The
+`handler_entry_virt` is the supervisor mode virtual address of the
+handler function. The parameters `handler_context_phys_hi` and
+`handler_context_phys_lo` contain the upper and lower XLEN bits,
+respectively, of the context's physical address.
+
+On successful registration, the event state moves from `UNUSED` to
+`REGISTERED`. In case of an error, possible error codes are listed in
+<<table_sse_register_errors>> below:
+
+[#table_sse_register_errors]
+.SSE Event Register Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code              | Description
+| SBI_SUCCESS             | Event handler is registered successfully.
+| SBI_ERR_INVALID_STATE   | The event is not in `UNUSED` state.
+| SBI_ERR_INVALID_PARAM   | `event_id` is invalid or other parameters not satisfy
+	                    requirements defined in <<_software_event_handler>>.
+| SBI_ERR_INVALID_ADDRESS | The memory pointed by `handler_context_size`,
+	                    `handler_context_phys_lo`, `handler_context_phys_hi`,
+                            paramaters does not satisfy the requirements described
+	                    in <<_shared_memory_physical_address_range_parameter>>.
+|===
+
+=== Function: Unregister a software event (FID #3)
+
+[source, C]
+----
+struct sbiret sbi_sse_unregister(uint32_t event_id)
+----
+
+Unregister the handler for given `event_id`. The event MUST be in `REGISTERED`
+state before it can be unregistered.
+
+On successful unregistration, the event is moved to `UNREGISTERED` state.
+In case of an error, possible error codes are listed in
+<<table_sse_unregister_errors>> below:
+
+[#table_sse_unregister_errors]
+.SSE Event Unregister Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code              | Description
+| SBI_SUCCESS             | Event handler is unregistered successfully.
+| SBI_ERR_INVALID_STATE   | Event is not in `REGISTERED` state.
+| SBI_ERR_INVALID_PARAM   | `event_id` is invalid.
+|===
+
+=== Function: Enable a software event (FID #4)
+
+[source, C]
+----
+struct sbiret sbi_sse_enable(uint32_t event_id)
+----
+
+Enable the software event specified by the `event_id` parameter.
+For local events, the event is enabled only for the calling HART.
+For global events, the event is enabled for all the harts of
+supervisor software.
+
+The event MUST be in `REGISTERED` state otherwise this function will fail.
+
+On success, the event is moved to `ENABLED` state and SBI implementation
+can inject the event when it occurs. In case of an error, possible
+error codes are listed in <<table_sse_enable_errors>> below:
+
+[#table_sse_enable_errors]
+.SSE Event Enable Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code              | Description
+| SBI_SUCCESS             | Event is successfully enabled.
+| SBI_ERR_INVALID_PARAM   | `event_id` is not valid.
+| SBI_ERR_INVALID_STATE   | The event is not in `REGISTERED` state.
+|===
+
+=== Function: Disable a software event (FID #5)
+
+[source, C]
+----
+struct sbiret sbi_sse_disable(uint32_t event_id)
+----
+
+Disable the software event specified by the `event_id` parameter.
+For local events, the event is disabled only for the calling HART.
+For global events, the event is disabled for all the harts of
+supervisor software. The event must be in `ENABLED` state.
+
+On success, the event is moved to `REGISTERED` state. In case of
+an error, possible error codes are listed in
+<<table_sse_disable_errors>>.
+
+[#table_sse_disable_errors]
+.SSE Event Disable Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code              | Description
+| SBI_SUCCESS             | Event is successfully disabled.
+| SBI_ERR_INVALID_PARAM   | `event_id` is not valid.
+| SBI_ERR_INVALID_STATE   | Event is not in `ENABLED` state.
+|===
+
+=== Function: Complete software event handling (FID #6)
+
+[source, C]
+----
+struct sbiret sbi_sse_complete(uint32_t event_id,
+                               uint32_t status)
+----
+
+Complete the supervisor event handling for the event. The event
+must be in `RUNNING` state.
+
+If supervisor software could not handle the event, it must
+set the `status` parameter to `SBI_SSE_HANDLER_FAILED`. On success,
+it must set the `status` parameter to `SBI_SSE_HANDLER_SUCCESS`.
+Other possible status codes are listed in <<table_sse_complete_status>>.
+Any other value of `status` field is ignored.
+
+
+[#table_sse_complete_status]
+.SSE Event Complete Status Values
+[cols="3,2,3", width=90%, align="center", options="header"]
+|===
+| Value         | Enum Name                | Description
+| 0x00000000    | SBI_SSE_HANDLER_SUCCESS  | Supervisor successfully handled the event.
+| 0x00000001    | SBI_SSE_HANDLER_FAILED   | Supervisor failed to handle the event.
+| > 0x00000001  | -                        | Reserved
+|===
+
+In case of an error, possible error codes are listed in <<table_sse_complete_errors>>.
+
+[#table_sse_complete_errors]
+.SSE Event Complete Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code              | Description
+| SBI_SUCCESS             | Event is successfully marked completed.
+| SBI_ERR_INVALID_PARAM   | `event_id` is invalid or `status` has invalid value.
+| SBI_ERR_INVALID_STATE   | The `event_id` event is not in RUNNING state.
+|===
+
+=== Function: Signal a software event (FID #7)
+
+[source, C]
+----
+struct sbiret sbi_sse_inject(uint32_t event_id,
+                             unsigned long hart_id)
+----
+
+The supervisor software can inject a software event with the
+help of this function. The `event_id` paramater refers to the
+event to be injected.
+
+For global events, the `hart_id` parameter is ignored. For local
+events, the `hart_id` parameter refers to the HART on which the
+event is to be injected. An event can only be injected if it is
+allowed by the event attribute as described in
+<<table_sse_event_attributes>>.
+
+In case of an error, possible error codes are listed
+in <<table_sse_inject_errors>>.
+
+[#table_sse_inject_errors]
+.SSE Event Inject Errors
+[cols="2,3", width=90%, align="center", options="header"]
+|===
+| Error code              | Description
+| SBI_SUCCESS             | Event is successfully injected or marked PENDING
+	                    on given HART
+| SBI_ERR_INVALID_PARAM   | `event_id` or `hart_id` is invalid.
+|===
