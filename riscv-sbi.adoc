@@ -74,6 +74,8 @@ https://creativecommons.org/licenses/by/4.0/.
 * Added SBI nested acceleration extension
 * Added common description for a virtual HART
 * Added SBI steal-time accounting extension
+* Added error code to refer to invalid state of a state machine.
+* Added error code to refer to a value which is out of its valid range.
 
 === Version 1.0.0
 
@@ -229,6 +231,8 @@ error codes.
 |  SBI_ERR_ALREADY_STARTED   | -7    | Already started
 |  SBI_ERR_ALREADY_STOPPED   | -8    | Already stopped
 |  SBI_ERR_NO_SHMEM          | -9    | Shared memory not available
+|  SBI_ERR_INVALID_STATE     | -10
+|  SBI_ERR_BAD_RANGE         | -11
 |===
 
 An `ECALL` with an unsupported SBI extension ID (*EID*) or an unsupported SBI
