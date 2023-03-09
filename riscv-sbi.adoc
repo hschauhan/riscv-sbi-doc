@@ -68,6 +68,8 @@ https://creativecommons.org/licenses/by/4.0/.
 * Reserved space for SBI implementation specific firmware events
 * Added SBI system suspend extension
 * Added SBI CPPC extension
+* Added error code to refer to invalid state of a state machine.
+* Added error code to refer to a value which is out of its valid range.
 
 === Version 1.0.0
 
@@ -214,6 +216,8 @@ error codes.
 |  SBI_ERR_ALREADY_AVAILABLE | -6
 |  SBI_ERR_ALREADY_STARTED   | -7
 |  SBI_ERR_ALREADY_STOPPED   | -8
+|  SBI_ERR_INVALID_STATE     | -9
+|  SBI_ERR_BAD_RANGE         | -10
 |===
 
 An `ECALL` with an unsupported SBI extension ID (*EID*) or an unsupported SBI
