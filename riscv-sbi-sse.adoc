@@ -1,8 +1,8 @@
 == SBI Supervisor Software Events Extension (EID #0x535345 "SSE")
 
 The SBI Supervisor Software Events (SSE) extension provides a
-mechanism to inject software events from SBI implementation to
-supervisor software such that it preempts all other traps and
+mechanism to inject software events from an SBI implementation
+to supervisor software such that it preempts all other traps and
 interrupts.
 
 The software events can be of two types: local or global. A
@@ -62,8 +62,8 @@ but supervisor software can select a specific HART to handle this event.
 The state of a global software event **MUST** be common to all HARTs.
 
 A **local** software event **MUST** be registered and enabled by all HARTs
-who want to handle this event. The state of a local software event
-**MUST** be tracked separately for each HART.
+who want to handle the event. The state of a local software event **MUST**
+be tracked separately for each HART.
 
 === Software Event Priority
 
@@ -83,11 +83,14 @@ previous handler will be resumed.
 
 === Software Event Attributes
 
-The details of a software event (local or global) can be
-accessed by supervisor software inform for event attributes.
-Each event attribute is identified using a unique 32-bit
-unsigned integer called `attr_id`. The <<table_sse_event_attributes>>
-below provides a list event attributes.
+A software event can have various attributes associated to it.
+A software event attribute is a unique 32-bit unsigned integer
+called `attr_id`. An attribute can have a Read-Only or Read-Write
+access permissions. The supervisor software can query these event
+attributes and change the attributes that have Read-Write access
+permissions.
+The <<table_sse_event_attributes>> below provides a list
+event attributes.
 
 [#table_sse_event_attributes]
 .SSE Event Attributes
@@ -140,103 +143,129 @@ below provides a list event attributes.
 === Software Event Handler
 To handle a software event, the supervisor software MUST register
 an event handler and enable it. Each event handler registered by
-the supervisor software consist of two things:
+the supervisor software consists of a handler context (also referred to as `handler_context`).
 
-. **Handler entry virtual address** - The entry virtual address of event
-handler code is represented by `handler_entry_virt`. The
-`handler_entry_virt` must be a 2-byte aligned address.
+The `handler_context` contains the following register states:
 
-. **Handler context** - The event handler context must be contiguous in
-both virtual and physical address space. The virtual address and
-physical address of event handler context is represented by
-`handler_context_virt` and `handler_context_phys` respectively. The
-size of the event handler context is represented by `handler_context_size`.
-Both `handler_context_virt` and `handler_context_phys` must be aligned
-to (XLEN / 8) bytes whereas `handler_context_size` must be at least 4096
-bytes and multiple of (XLEN / 8). The supervisor state is saved at the end
-of the handler context.
+. **Entry State** - It contains the supervisor register state when handling the software event
+  injected by SBI implementation. It is referred as `entry_state`. This register state
+  must be initialized by the supervisor software before registering the handler. The handler's
+  entry point is at the offset 0 of the `entry_state` as mentioned in
+  <<table_sse_entry_state_reg_offset>>
+. **Interrupted State** - It contains interrupted register state and is referred as
+  `interrupted_state`. The interrupted execution mode is saved at the end of the
+  `interrupted_state`.
+
+The `handler_context`  must be contiguous in both virtual and physical address
+space. The physical address of the `handler_context` is represented by
+`handler_context_phys`.
+
+[#table_sse_entry_state_reg_offset]
+[cols="5,3", width=90%, align="center", options="header"]
+.SSE Register offsets in entry state
+|===
+| Register Offsets in Entry State    | Data
+| `entry_state` + 0 * `(XLEN / 8)`    | Entry program counter +
+                                        Must be 2-byte aligned virtual address.
+| `entry_state` + 1 * `(XLEN / 8)`     | X1
+| `entry_state` + 2 * `(XLEN / 8)`     | X2
+| `entry_state` + 3 * `(XLEN / 8)`     | X3
+| `entry_state` + 4 * `(XLEN / 8)`     | X4
+| `entry_state` + 5 * `(XLEN / 8)`     | X5
+| `entry_state` + 6 * `(XLEN / 8)`     | X6
+| `entry_state` + 7 * `(XLEN / 8)`     | X7
+| `entry_state` + 8 * `(XLEN / 8)`     | X8
+| `entry_state` + 9 * `(XLEN / 8)`     | X9
+| `entry_state` + 10 * `(XLEN / 8)`    | X10
+| `entry_state` + 11 * `(XLEN / 8)`    | X11
+| `entry_state` + 12 * `(XLEN / 8)`    | X12
+| `entry_state` + 13 * `(XLEN / 8)`    | X13
+| `entry_state` + 14 * `(XLEN / 8)`    | X14
+| `entry_state` + 15 * `(XLEN / 8)`    | X15
+| `entry_state` + 16 * `(XLEN / 8)`    | X16
+| `entry_state` + 17 * `(XLEN / 8)`    | X17
+| `entry_state` + 18 * `(XLEN / 8)`    | X18
+| `entry_state` + 19 * `(XLEN / 8)`    | X19
+| `entry_state` + 20 * `(XLEN / 8)`    | X20
+| `entry_state` + 21 * `(XLEN / 8)`    | X21
+| `entry_state` + 22 * `(XLEN / 8)`    | X22
+| `entry_state` + 23 * `(XLEN / 8)`    | X23
+| `entry_state` + 24 * `(XLEN / 8)`    | X24
+| `entry_state` + 25 * `(XLEN / 8)`    | X25
+| `entry_state` + 26 * `(XLEN / 8)`    | X26
+| `entry_state` + 27 * `(XLEN / 8)`    | X27
+| `entry_state` + 28 * `(XLEN / 8)`    | X28
+| `entry_state` + 29 * `(XLEN / 8)`    | X29
+| `entry_state` + 30 * `(XLEN / 8)`    | X30
+| `entry_state` + 31 * `(XLEN / 8)`    | X31
+|===
+
+[#table_sse_interrupted_state_reg_offset]
+[cols="5,3", width=90%, align="center", options="header"]
+.SSE Register offsets in interrupted state
+|===
+| Register Offsets in Interrupted State      | Data
+| `interrupted_state` + 0 * `(XLEN / 8)`     | Interrupted program counter
+| `interrupted_state` + 1 * `(XLEN / 8)`     | Saved copy of X1
+| `interrupted_state` + 2 * `(XLEN / 8)`     | Saved copy of X2
+| `interrupted_state` + 3 * `(XLEN / 8)`     | Saved copy of X3
+| `interrupted_state` + 4 * `(XLEN / 8)`     | Saved copy of X4
+| `interrupted_state` + 5 * `(XLEN / 8)`     | Saved copy of X5
+| `interrupted_state` + 6 * `(XLEN / 8)`     | Saved copy of X6
+| `interrupted_state` + 7 * `(XLEN / 8)`     | Saved copy of X7
+| `interrupted_state` + 8 * `(XLEN / 8)`     | Saved copy of X8
+| `interrupted_state` + 9 * `(XLEN / 8)`     | Saved copy of X9
+| `interrupted_state` + 10 * `(XLEN / 8)`    | Saved copy of X10
+| `interrupted_state` + 11 * `(XLEN / 8)`    | Saved copy of X11
+| `interrupted_state` + 12 * `(XLEN / 8)`    | Saved copy of X12
+| `interrupted_state` + 13 * `(XLEN / 8)`    | Saved copy of X13
+| `interrupted_state` + 14 * `(XLEN / 8)`    | Saved copy of X14
+| `interrupted_state` + 15 * `(XLEN / 8)`    | Saved copy of X15
+| `interrupted_state` + 16 * `(XLEN / 8)`    | Saved copy of X16
+| `interrupted_state` + 17 * `(XLEN / 8)`    | Saved copy of X17
+| `interrupted_state` + 18 * `(XLEN / 8)`    | Saved copy of X18
+| `interrupted_state` + 19 * `(XLEN / 8)`    | Saved copy of X19
+| `interrupted_state` + 20 * `(XLEN / 8)`    | Saved copy of X20
+| `interrupted_state` + 21 * `(XLEN / 8)`    | Saved copy of X21
+| `interrupted_state` + 22 * `(XLEN / 8)`    | Saved copy of X22
+| `interrupted_state` + 23 * `(XLEN / 8)`    | Saved copy of X23
+| `interrupted_state` + 24 * `(XLEN / 8)`    | Saved copy of X24
+| `interrupted_state` + 25 * `(XLEN / 8)`    | Saved copy of X25
+| `interrupted_state` + 26 * `(XLEN / 8)`    | Saved copy of X26
+| `interrupted_state` + 27 * `(XLEN / 8)`    | Saved copy of X27
+| `interrupted_state` + 28 * `(XLEN / 8)`    | Saved copy of X28
+| `interrupted_state` + 29 * `(XLEN / 8)`    | Saved copy of X29
+| `interrupted_state` + 30 * `(XLEN / 8)`    | Saved copy of X30
+| `interrupted_state` + 31 * `(XLEN / 8)`    | Saved copy of X31
+| `interrupted_state` + 32 * `(XLEN / 8)`    | Interrupted Execution mode +
+                                              **bit [0]** = Privilege mode which
+                                              was interrupted +
+                                              (1 = S-mode, 0 = U-mode) +
+                                              **bit [1]** = Virtualization state
+                                              which was interrupted +
+                                              (1 = ON, 0 = OFF) +
+                                              **bit [2]** = Saved copy of
+                                              sstatus.SPIE +
+                                              **bit [XLEN-1:3]** = Reserved for
+                                              future use
+|===
 
 === Software Event Injection
 
 To inject a software event on a HART, the SBI implementation must
 do the following:
 
-. Compute handler stack pointer (`handler_sp`) which is `XLEN / 8`
-  bytes aligned and **at least 1024 bytes** away from the end of the
-  event handler context. For example, an analogous C statement would
-  be:
-
-[source, C]
-----
-  handler_sp = handler_context_virt + handler_context_size - 1024
-----
-
-[#sse_save_exception_state,reftext=SSE save exception state]
-[start=2]
-. Save supervisor register state relative to the handler stack
-  pointer (`handler_sp`) in little endian byte ordering as shown
-  in <<table_sse_register_saved_state>> below.
-
-[#table_sse_register_saved_state]
-.SSE Supervisor Register Saved State On Stack
-[cols="5,3", width=90%, align="center", options="header"]
-|===
-| Handler Stack Offset              | Data
-| `handler_sp` + 0 * (XLEN / 8)     | Interrupted program counter
-| `handler_sp` + 1 * (XLEN / 8)     | Saved copy of X1
-| `handler_sp` + 2 * (XLEN / 8)     | Saved copy of X2
-| `handler_sp` + 3 * (XLEN / 8)     | Saved copy of X3
-| `handler_sp` + 4 * (XLEN / 8)     | Saved copy of X4
-| `handler_sp` + 5 * (XLEN / 8)     | Saved copy of X5
-| `handler_sp` + 6 * (XLEN / 8)     | Saved copy of X6
-| `handler_sp` + 7 * (XLEN / 8)     | Saved copy of X7
-| `handler_sp` + 8 * (XLEN / 8)     | Saved copy of X8
-| `handler_sp` + 9 * (XLEN / 8)     | Saved copy of X9
-| `handler_sp` + 10 * (XLEN / 8)    | Saved copy of X10
-| `handler_sp` + 11 * (XLEN / 8)    | Saved copy of X11
-| `handler_sp` + 12 * (XLEN / 8)    | Saved copy of X12
-| `handler_sp` + 13 * (XLEN / 8)    | Saved copy of X13
-| `handler_sp` + 14 * (XLEN / 8)    | Saved copy of X14
-| `handler_sp` + 15 * (XLEN / 8)    | Saved copy of X15
-| `handler_sp` + 16 * (XLEN / 8)    | Saved copy of X16
-| `handler_sp` + 17 * (XLEN / 8)    | Saved copy of X17
-| `handler_sp` + 18 * (XLEN / 8)    | Saved copy of X18
-| `handler_sp` + 19 * (XLEN / 8)    | Saved copy of X19
-| `handler_sp` + 20 * (XLEN / 8)    | Saved copy of X20
-| `handler_sp` + 21 * (XLEN / 8)    | Saved copy of X21
-| `handler_sp` + 22 * (XLEN / 8)    | Saved copy of X22
-| `handler_sp` + 23 * (XLEN / 8)    | Saved copy of X23
-| `handler_sp` + 24 * (XLEN / 8)    | Saved copy of X24
-| `handler_sp` + 25 * (XLEN / 8)    | Saved copy of X25
-| `handler_sp` + 26 * (XLEN / 8)    | Saved copy of X26
-| `handler_sp` + 27 * (XLEN / 8)    | Saved copy of X27
-| `handler_sp` + 28 * (XLEN / 8)    | Saved copy of X28
-| `handler_sp` + 29 * (XLEN / 8)    | Saved copy of X29
-| `handler_sp` + 30 * (XLEN / 8)    | Saved copy of X30
-| `handler_sp` + 31 * (XLEN / 8)    | Saved copy of X31
-| `handler_sp` + 32 * (XLEN / 8)    | Interrupted state +
-                                      **bit[0]** = Privilege mode which
-                                                   was interrupted +
-                                                  (1 = S-mode, 0 = U-mode) +
-                                      **bit[1]** = Virtualization state
-                                                  which was interrupted +
-                                                 (1 = ON, 0 = OFF) +
-                                      **bit[2]** = Saved copy of
-                                                   sstatus.SPIE +
-                                      **bit[XLEN-1:3]** = Reserved for
-                                                          future use
-|===
-
-[start=3]
-. Update supervisor registers as follows:
-   .. Set sp = `handler_sp`
-   .. Set a0 = `event_id`
-   .. Set a1 = `handler_sp`
-   .. Set a2 = `handler_context_virt`
+. Copy X1 to X31 registers into the `interrupted_state` in `handler_context`
+  from the offsets mentioned in <<table_sse_interrupted_state_reg_offset>>.
+. Load X1 to X31 registers from `entry_state` in `handler_context` from the
+  offsets mentioned in <<table_sse_entry_state_reg_offset>>.
+. Save the interrupted mode at offset `interrupted_state` + 32 * `(XLEN / 8)`
+  in `handler_context` as shown in <<table_sse_interrupted_state_reg_offset>>.
+. Update registers as follows:
    .. Set sstatus.SPIE = sstatus.SIE
    .. Set sstatus.SIE = 0
 . Resume execution with:
-   .. Program counter = `handler_entry_virt`
+   .. Program counter = value at `entry_state` + 0 * `(XLEN / 8)`
    .. Privilege mode = S-mode
    .. Virtualization state = OFF
 
@@ -248,22 +277,23 @@ of event handling using using `sbi_sse_complete` call. The
 SBI implementation must do the following to complete event
 handling and resume interrupted state:
 
-. Re-compute handler stack pointer (`handler_sp`) as described
-  in <<_software_event_injection>>.
-. Restore X1 to X31 registers from offsets relative to the
-  handler stack pointer (`handler_sp`) as described in
-  <<table_sse_register_saved_state>>.
+. Restore X1 to X31 registers from the `interrupted_state` of
+  `handler_context` from the offsets mentioned in
+  <<table_sse_interrupted_state_reg_offset>>.
 . Update supervisor CSRs as follows:
    .. Set sstatus.SIE = sstatus.SPIE
    .. Set sstatus.SPIE = bit[2] of the value at
-                        `handler_sp` + 32 * (XLEN / 8)
+                        `interrupted_state` + 32 * `(XLEN / 8)`
 . Resume execution with:
    * Virtualization state =  bit[1] of the value at
-                            `handler_sp` + 32 * (XLEN / 8)
+                            `interrupted_state` + 32 * `(XLEN / 8)`
    * Privilege mode = bit[0] of the value at
-                     `handler_sp` + 32 * (XLEN / 8)
-   * Program counter = value at `handler_sp` + 0 * (XLEN / 8)
+                     `interrupted_state` + 32 * `(XLEN / 8)`
+   * Program counter = value at `interrupted_state` + 0 * `(XLEN / 8)`
 
+If the supervisor software wishes to resume from a different location,
+it can update the `interrupted_state` fields accordinly.
+ 
 === Function: Get a software event attribute (FID #0)
 
 [source, C]
@@ -322,19 +352,16 @@ are listed in <<table_sse_set_attr_errors>> below:
 [source, C]
 ----
 struct sbiret sbi_sse_register(uint32_t event_id,
-                               unsigned long handler_entry_virt,
-                               unsinged long handler_context_virt,
                                unsigned long handler_context_phys_hi,
-                               unsigned long handler_context_phys_lo,
-                               unsigned long handler_context_size)
+                               unsigned long handler_context_phys_lo)
 ----
 
 Register a handler for the software event. The `event_id` parameter
 specifies the event ID for which handler is being registered. The
-`handler_entry_virt` is the supervisor mode virtual address of the
-handler function. The parameters `handler_context_phys_hi` and
-`handler_context_phys_lo` contain the upper and lower XLEN bits,
-respectively, of the context's physical address.
+parameters `handler_context_phys_hi` and `handler_context_phys_lo`
+contain the upper and lower XLEN bits, respectively, of the handler's
+context. The `handler_context_phys_lo` parameter must be `(XLEN / 8)`
+byte aligned.
 
 On successful registration, the event state moves from `UNUSED` to
 `REGISTERED`. In case of an error, possible error codes are listed in
@@ -349,10 +376,12 @@ On successful registration, the event state moves from `UNUSED` to
 | SBI_ERR_INVALID_STATE   | The event is not in `UNUSED` state.
 | SBI_ERR_INVALID_PARAM   | `event_id` is invalid or other parameters not satisfy
 	                    requirements defined in <<_software_event_handler>>.
-| SBI_ERR_INVALID_ADDRESS | The memory pointed by `handler_context_size`,
-	                    `handler_context_phys_lo`, `handler_context_phys_hi`,
-                            paramaters does not satisfy the requirements described
-	                    in <<_shared_memory_physical_address_range_parameter>>.
+| SBI_ERR_INVALID_ADDRESS | The memory pointed by `handler_context_phys_lo`,
+			    `handler_context_phys_hi`, paramaters does not satisfy
+			    the requirements described
+	                    in <<_shared_memory_physical_address_range_parameter>> or
+			    The `handler_context_phys_lo` parameter is not `(XLEN / 8)`
+	                    byte aligned.
 |===
 
 === Function: Unregister a software event (FID #3)
