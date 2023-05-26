@@ -21,16 +21,16 @@ integer called `event_id` which is encoded as shown in
 [cols="2,3", width=90%, align="center", options="header"]
 |===
 | Software Event ID            | Description
-| 0x00000000                   | Local debug event
-| 0x00000001                   | Local RAS event
+| 0x00000000                   | Local RAS event
+| 0x00000001                   | Local PMU event
 | 0x00000002                   | Local async page fault event
-| 0x00000003                   | Local PMU event
-| 0x00000004 - 0x3fffffff      | Reserved for future use
-| 0x40000000 - 0x7fffffff      | Local platform specific event
-| 0x80000000                   | Global debug event
-| 0x80000001                   | Global RAS event
-| 0x80000002 - 0xbfffffff      | Reserved for future use
-| 0xc0000000 - 0xffffffff      | Global platform specific event
+| 0x00000003 - 0x3fffffff      | Reserved for future use
+| 0x40000000 - 0x7ffffffe      | Local platform specific event
+| 0x7fffffff                   | Local debug event
+| 0x80000000                   | Global RAS event
+| 0x80000001 - 0xbfffffff      | Reserved for future use
+| 0xc0000000 - 0xfffffffe      | Global platform specific event
+| 0xffffffff                   | Global debug event
 |===
 
 === Software Event States
@@ -73,13 +73,21 @@ implementation to select a software event for injection
 when multiple software events are pending on the same HART.
 
 The priority of a software event is a 32-bit unsigned
-integer where higher value means higher priority. By default,
+integer where lower value means higher priority. By default,
 all software events have event priority as zero.
+
+If two or more event have same priority on a given hart
+then SBI implementation must use `event_id` to break the tie
+where lower `event_id` has higher priority.
 
 A higher priority event, unless disabled by supervisor software,
 **always** preempts a lower priority event on the same HART.
 Once the higher priority event is marked as completed, the
 previous handler will be resumed.
+
+NOTE: If a pending or running event is signalled by the event source again,
+the event will become pending only after the current event completes
+provided that supervisor software doesn't disable the event on completion.
 
 === Software Event Attributes
 
@@ -159,6 +167,11 @@ The `handler_context` contains the following register states:
 The `handler_context`  must be contiguous in both virtual and physical address
 space. The physical address of the `handler_context` is represented by
 `handler_context_phys`.
+
+NOTE: It is advisable to use different context for different events. Since a higher
+priority event can preempt the lower priority event, if same context is used then the
+interrupted state will be overwritten with register values of the higher priority event.
+This will make resuming to the previous handler impossible.
 
 [#table_sse_entry_state_reg_offset]
 [cols="5,3", width=90%, align="center", options="header"]
@@ -292,7 +305,7 @@ handling and resume interrupted state:
    * Program counter = value at `interrupted_state` + 0 * `(XLEN / 8)`
 
 If the supervisor software wishes to resume from a different location,
-it can update the `interrupted_state` fields accordinly.
+it can update the `interrupted_state` fields accordingly.
  
 === Function: Get a software event attribute (FID #0)
 
@@ -377,7 +390,7 @@ On successful registration, the event state moves from `UNUSED` to
 | SBI_ERR_INVALID_PARAM   | `event_id` is invalid or other parameters not satisfy
 	                    requirements defined in <<_software_event_handler>>.
 | SBI_ERR_INVALID_ADDRESS | The memory pointed by `handler_context_phys_lo`,
-			    `handler_context_phys_hi`, paramaters does not satisfy
+			    `handler_context_phys_hi`, parameters does not satisfy
 			    the requirements described
 	                    in <<_shared_memory_physical_address_range_parameter>> or
 			    The `handler_context_phys_lo` parameter is not `(XLEN / 8)`
@@ -467,7 +480,8 @@ an error, possible error codes are listed in
 [source, C]
 ----
 struct sbiret sbi_sse_complete(uint32_t event_id,
-                               uint32_t status)
+                               uint32_t status,
+                               uint32_t flags)
 ----
 
 Complete the supervisor event handling for the event. The event
@@ -479,6 +493,9 @@ it must set the `status` parameter to `SBI_SSE_HANDLER_SUCCESS`.
 Other possible status codes are listed in <<table_sse_complete_status>>.
 Any other value of `status` field is ignored.
 
+The `flags` parameter represents additional information from supervisor
+to the SBI implementation and the <<table_sse_complete_flags>> lists
+the bit-encoding for it.
 
 [#table_sse_complete_status]
 .SSE Event Complete Status Values
@@ -488,6 +505,16 @@ Any other value of `status` field is ignored.
 | 0x00000000    | SBI_SSE_HANDLER_SUCCESS  | Supervisor successfully handled the event.
 | 0x00000001    | SBI_SSE_HANDLER_FAILED   | Supervisor failed to handle the event.
 | > 0x00000001  | -                        | Reserved
+|===
+
+[#table_sse_complete_flags]
+.SSE Event Complete Flags Values
+[cols="3,2,3", width=90%, align="center", options="header"]
+|===
+| Flag Name                   | Bits       | Description
+| SBI_SSE_EVENT_DISABLE       | 0:0        | Disable the event.
+| *RESERVED*                  | 1:(XLEN-1) | All non-zero values are
+                                           |  reserved for future use
 |===
 
 In case of an error, possible error codes are listed in <<table_sse_complete_errors>>.
