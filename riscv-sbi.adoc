@@ -75,6 +75,7 @@ https://creativecommons.org/licenses/by/4.0/.
 * Added common description for a virtual HART
 * Added SBI steal-time accounting extension
 * Added SBI PMU snapshot extension
+* Added error codes SBI_ERR_INVALID_STATE, SBI_ERR_BAD_RANGE, SBI_ERR_BUSY
 
 === Version 1.0.0
 
@@ -230,6 +231,9 @@ error codes.
 |  SBI_ERR_ALREADY_STARTED   | -7    | Already started
 |  SBI_ERR_ALREADY_STOPPED   | -8    | Already stopped
 |  SBI_ERR_NO_SHMEM          | -9    | Shared memory not available
+|  SBI_ERR_INVALID_STATE     | -10   | Invalid operation on state machine
+|  SBI_ERR_BAD_RANGE         | -11   | Value out of valid range
+|  SBI_ERR_BUSY              | -12   | Resource busy
 |===
 
 An `ECALL` with an unsupported SBI extension ID (*EID*) or an unsupported SBI
