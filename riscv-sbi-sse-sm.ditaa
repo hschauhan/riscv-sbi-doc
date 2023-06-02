@@ -1,0 +1,29 @@
+
+                           +------------------+
+                           |c003              |
+                     +---->|     UNUSED       |------+
+                     |     |                  |      |
+                     |     +------------------+      |
+sbi_sse_unregister() |                               | sbi_sse_register()
+                     |                               |
+                     |     +------------------+      |
+                     +-----|c2DF              |<-----+
+                           |   REGISTERED     |
+                     +---->|                  |------+
+                     |     +------------------+      |
+                     |                               |
+sbi_sse_disable()    |                               | sbi_sse_enable()
+                     |     +------------------+      |
+                     +-----|c35F              |<-----+
+                           |    ENABLED       |
+                     +---->|                  |------+
+                     |     +------------------+      |
+                     |                               |
+sbi_sse_complete()   |                               | Event is injected by
+                     |                               | the SBI implementation
+                     |                               | when signaled by the
+                     |     +------------------+      | event source
+                     |     |c7D4              |      |
+                     +-----|    RUNNING       |<-----+
+                           |                  |
+                           +------------------+
