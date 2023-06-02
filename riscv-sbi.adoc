@@ -76,6 +76,7 @@ https://creativecommons.org/licenses/by/4.0/.
 * Added SBI steal-time accounting extension
 * Added SBI PMU snapshot extension
 * Added error codes SBI_ERR_INVALID_STATE, SBI_ERR_BAD_RANGE, SBI_ERR_BUSY
+* Added SBI supervisor sofware event extension
 
 === Version 1.0.0
 
@@ -2937,6 +2938,11 @@ below.
 | Function Name               | SBI Version | FID | EID
 | sbi_steal_time_set_shmem    | 2.0         |  0  | 0x535441
 |===
+
+////
+Chapter for Supervisor Software Events Extension
+////
+include::riscv-sbi-sse.adoc[]
 
 == Experimental SBI Extension Space (EIDs #0x08000000 - #0x08FFFFFF)
 
